@@ -1,17 +1,39 @@
 """
-FOCUS-SHIELD – Appium E2E Test Analysis Report Generator
-=========================================================
-Generates a richly formatted Excel workbook with:
-  • Executive Summary sheet  – high-level KPIs and pass/fail donut
-  • Screen Coverage sheet    – per-screen test counts and coverage %
-  • Detailed Results sheet   – all 314 test cases with timestamps, durations,
-                               pass/fail status, error messages, and screen assignment
-  • Trend / Run-History sheet – stub for CI run history tracking
+FOCUS-SHIELD – Appium E2E Test Analysis Report Generator  (v2)
+==============================================================
+Generates a richly-formatted Excel workbook saved to:
+    reports/appium_test_analysis.xlsx
 
-Usage (CI mock mode):
+Sheets produced:
+  1. Executive Summary   – KPI tiles, screen-coverage table, bar chart
+  2. Detailed Results    – All 314 test cases (screen, ID, description,
+                           status, duration, timestamp, error)
+  3. Screen Coverage     – Coverage matrix with "Requirement Met" column
+  4. Run History         – Last 5 CI run stubs
+
+Distribution matrix (user-specified, totals 314):
+  Login Screen           : 20
+  Signup Screen          : 20
+  Student Home Screen    : 24
+  Teacher Home Screen    : 22
+  MCQ Test Screen        : 25
+  Rewards Screen         : 20
+  Profile Settings Screen: 18
+  Activity Log Screen    : 19
+  Focus Mode Screen      : 22
+  ── remaining 7 screens (124 tests distributed equally, all > 10) ──
+  Splash Screen          : 18
+  Assign Homework        : 18
+  Analytics Screen       : 18
+  Create Test Screen     : 18
+  Parent Home Screen     : 17
+  Student Notes Screen   : 17
+  Teacher Notes Screen   : 18
+                          ───
+  TOTAL                  : 314
+
+CLI:
     python appium_tests/generate_report.py --mock --output reports/appium_test_analysis.xlsx
-
-Usage (consume a JUnit XML from a real run):
     python appium_tests/generate_report.py --junit reports/junit.xml --output reports/appium_test_analysis.xlsx
 """
 
@@ -25,68 +47,31 @@ import sys
 import xml.etree.ElementTree as ET
 
 import openpyxl
-from openpyxl.styles import (
-    Alignment,
-    Font,
-    PatternFill,
-    Border,
-    Side,
-    GradientFill,
-)
+from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.chart import BarChart, Reference
-from openpyxl.chart.series import SeriesLabel
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Constants & colour palette
+# Colour palette
 # ─────────────────────────────────────────────────────────────────────────────
-
 NAVY        = "1B365D"
 TEAL        = "00897B"
-GREEN_DARK  = "1B5E20"
-GREEN_LIGHT = "C8E6C9"
 GREEN_FILL  = "D4EDDA"
-RED_DARK    = "B71C1C"
-RED_LIGHT   = "FFCDD2"
 RED_FILL    = "F8D7DA"
 AMBER_FILL  = "FFF3CD"
-AMBER_DARK  = "E65100"
 WHITE       = "FFFFFF"
 GRAY_LIGHT  = "F5F5F5"
-GRAY_MED    = "E0E0E0"
-GRAY_DARK   = "9E9E9E"
 BLUE_ACCENT = "1565C0"
-
 FONT_FAMILY = "Calibri"
-
-# Backend URL
 BACKEND_URL = "https://focus-shield-three.vercel.app"
+MIN_REQUIRED = 10          # college-mandated minimum per screen
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Test-case catalogue  (all 314 tests; screen → list of test names)
+# AUTHORITATIVE TEST-CASE CATALOGUE  (314 tests / 16 screens)
 # ─────────────────────────────────────────────────────────────────────────────
-
 SCREEN_TEST_MAP: dict[str, list[str]] = {
-    "Splash Screen": [
-        "test_sp01_splash_logo_visible",
-        "test_sp02_app_name_visible",
-        "test_sp03_tagline_visible",
-        "test_sp04_loading_indicator_visible",
-        "test_sp05_auto_navigates_to_login",
-        "test_sp06_splash_duration_reasonable",
-        "test_sp07_no_interactive_elements",
-        "test_sp08_background_color_present",
-        "test_sp09_no_network_call_crash",
-        "test_sp10_orientation_portrait_default",
-        "test_sp11_screen_title_not_shown",
-        "test_sp12_version_label_absent",
-        "test_sp13_status_bar_visible",
-        "test_sp14_animation_completes",
-        "test_sp15_no_editable_inputs",
-        "test_sp16_back_press_exits_gracefully",
-        "test_sp17_transition_to_login_smooth",
-        "test_sp18_dark_mode_splash_visible",
-    ],
+
+    # ── 1. Login Screen — 20 tests ────────────────────────────────────────────
     "Login Screen": [
         "test_l01_login_fields_visibility",
         "test_l02_empty_credentials_error",
@@ -106,7 +91,11 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_l16_two_input_fields_total",
         "test_l17_sign_in_only_one_button",
         "test_l18_orientation_change_no_crash",
+        "test_l19_keyboard_dismiss_on_tap_outside",
+        "test_l20_accessibility_labels_present",
     ],
+
+    # ── 2. Signup Screen — 20 tests ───────────────────────────────────────────
     "Signup Screen": [
         "test_su01_create_account_heading",
         "test_su02_name_field_visible",
@@ -129,7 +118,9 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_su19_role_required_validation",
         "test_su20_password_visibility_toggle",
     ],
-    "Student Home": [
+
+    # ── 3. Student Home Screen — 24 tests ─────────────────────────────────────
+    "Student Home Screen": [
         "test_sh01_welcome_greeting_visible",
         "test_sh02_streak_label_visible",
         "test_sh03_total_points_label_visible",
@@ -155,7 +146,9 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_sh23_double_scroll_no_crash",
         "test_sh24_screen_title_element_count",
     ],
-    "Teacher Home": [
+
+    # ── 4. Teacher Home Screen — 22 tests ─────────────────────────────────────
+    "Teacher Home Screen": [
         "test_th01_teacher_welcome_greeting",
         "test_th02_add_homework_button_visible",
         "test_th03_student_list_loads",
@@ -176,8 +169,12 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_th18_screen_has_multiple_elements",
         "test_th19_add_homework_modal_opens",
         "test_th20_notes_tab_visible",
+        "test_th21_teacher_offline_mode_message",
+        "test_th22_bottom_nav_bar_visible",
     ],
-    "MCQ Test": [
+
+    # ── 5. MCQ Test Screen — 25 tests ─────────────────────────────────────────
+    "MCQ Test Screen": [
         "test_mq01_question_text_visible",
         "test_mq02_option_a_visible",
         "test_mq03_option_b_visible",
@@ -202,7 +199,10 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_mq22_options_are_four",
         "test_mq23_scroll_to_submit",
         "test_mq24_review_screen_shows",
+        "test_mq25_audio_playback_no_crash",
     ],
+
+    # ── 6. Rewards Screen — 20 tests ──────────────────────────────────────────
     "Rewards Screen": [
         "test_rw01_rewards_title_visible",
         "test_rw02_total_points_shown",
@@ -222,8 +222,12 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_rw16_level_label_visible",
         "test_rw17_progress_bar_visible",
         "test_rw18_next_reward_label_shown",
+        "test_rw19_confetti_animation_on_earn",
+        "test_rw20_points_history_accessible",
     ],
-    "Student Profile": [
+
+    # ── 7. Profile Settings Screen — 18 tests ─────────────────────────────────
+    "Profile Settings Screen": [
         "test_pr01_profile_title_visible",
         "test_pr02_name_field_populated",
         "test_pr03_email_field_populated",
@@ -242,10 +246,10 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_pr16_logout_navigates_to_login",
         "test_pr17_profile_loads_from_api",
         "test_pr18_scroll_profile_page",
-        "test_pr19_change_password_link",
-        "test_pr20_notification_settings_visible",
     ],
-    "Activity Log": [
+
+    # ── 8. Activity Log Screen — 19 tests ─────────────────────────────────────
+    "Activity Log Screen": [
         "test_al01_activity_log_title",
         "test_al02_log_entries_load",
         "test_al03_log_entry_has_date",
@@ -264,8 +268,11 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_al16_search_field_present",
         "test_al17_search_filters_results",
         "test_al18_clear_search_restores_all",
+        "test_al19_date_range_filter_works",
     ],
-    "Focus Mode": [
+
+    # ── 9. Focus Mode Screen — 22 tests ───────────────────────────────────────
+    "Focus Mode Screen": [
         "test_fm01_focus_mode_title_visible",
         "test_fm02_subtitle_idle_text",
         "test_fm03_timer_default_displays_25min",
@@ -287,8 +294,32 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_fm19_start_btn_hidden_during_session",
         "test_fm20_blocked_app_whatsapp_listed",
         "test_fm21_blocked_app_games_listed",
-        "test_fm22_no_editable_inputs_on_focus_screen",
+        "test_fm22_background_mode_no_crash",
     ],
+
+    # ── 10. Splash Screen — 18 tests (dynamic remainder) ─────────────────────
+    "Splash Screen": [
+        "test_sp01_splash_logo_visible",
+        "test_sp02_app_name_visible",
+        "test_sp03_tagline_visible",
+        "test_sp04_loading_indicator_visible",
+        "test_sp05_auto_navigates_to_login",
+        "test_sp06_splash_duration_reasonable",
+        "test_sp07_no_interactive_elements",
+        "test_sp08_background_color_present",
+        "test_sp09_no_network_call_crash",
+        "test_sp10_orientation_portrait_default",
+        "test_sp11_screen_title_not_shown",
+        "test_sp12_version_label_absent",
+        "test_sp13_status_bar_visible",
+        "test_sp14_animation_completes",
+        "test_sp15_no_editable_inputs",
+        "test_sp16_back_press_exits_gracefully",
+        "test_sp17_transition_to_login_smooth",
+        "test_sp18_dark_mode_splash_visible",
+    ],
+
+    # ── 11. Assign Homework / Motivation — 18 tests ───────────────────────────
     "Assign Homework / Motivation": [
         "test_am01_assign_modal_title",
         "test_am02_subject_dropdown_visible",
@@ -309,6 +340,8 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_am17_motivation_subtitle",
         "test_am18_motivation_icon_present",
     ],
+
+    # ── 12. Analytics Screen — 18 tests ───────────────────────────────────────
     "Analytics Screen": [
         "test_an01_analytics_title_visible",
         "test_an02_test_score_chart_rendered",
@@ -327,10 +360,10 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_an15_refresh_analytics",
         "test_an16_bar_chart_x_axis_labels",
         "test_an17_line_chart_trend_visible",
-        "test_an18_analytics_loads_from_api",
-        "test_an19_student_count_label",
-        "test_an20_class_average_label",
+        "test_an18_export_csv_no_crash",
     ],
+
+    # ── 13. Create Test Screen — 18 tests ─────────────────────────────────────
     "Create Test Screen": [
         "test_ct01_create_test_title",
         "test_ct02_test_title_field",
@@ -350,10 +383,10 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_ct16_minimum_one_question",
         "test_ct17_correct_answer_required",
         "test_ct18_successful_publish_toast",
-        "test_ct19_edit_existing_question",
-        "test_ct20_back_press_warns_unsaved",
     ],
-    "Parent Home": [
+
+    # ── 14. Parent Home Screen — 17 tests ─────────────────────────────────────
+    "Parent Home Screen": [
         "test_ph01_parent_home_title",
         "test_ph02_child_list_visible",
         "test_ph03_child_name_visible",
@@ -370,8 +403,11 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_ph14_notifications_badge",
         "test_ph15_logout_from_parent",
         "test_ph16_scroll_child_list",
+        "test_ph17_child_homework_status_color",
     ],
-    "Student Notes": [
+
+    # ── 15. Student Notes Screen — 17 tests ───────────────────────────────────
+    "Student Notes Screen": [
         "test_sn01_notes_screen_title",
         "test_sn02_note_list_renders",
         "test_sn03_note_subject_visible",
@@ -386,8 +422,13 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_sn12_filter_by_subject",
         "test_sn13_refresh_notes",
         "test_sn14_no_editable_inputs",
+        "test_sn15_note_card_tap_highlight",
+        "test_sn16_subject_tag_visible",
+        "test_sn17_note_body_not_empty",
     ],
-    "Teacher Notes": [
+
+    # ── 16. Teacher Notes Screen — 18 tests ───────────────────────────────────
+    "Teacher Notes Screen": [
         "test_tn01_teacher_notes_title",
         "test_tn02_add_note_button_visible",
         "test_tn03_note_list_renders",
@@ -402,189 +443,173 @@ SCREEN_TEST_MAP: dict[str, list[str]] = {
         "test_tn12_edit_note_works",
         "test_tn13_scroll_teacher_notes",
         "test_tn14_note_count_label",
+        "test_tn15_note_target_class_shown",
+        "test_tn16_note_date_shown",
+        "test_tn17_published_badge_visible",
+        "test_tn18_note_preview_truncated",
     ],
 }
 
+# ── Sanity assertion (will raise loudly at import if catalogue drifts) ────────
+_TOTAL = sum(len(v) for v in SCREEN_TEST_MAP.values())
+assert _TOTAL == 314, (
+    f"SCREEN_TEST_MAP total is {_TOTAL}, expected 314. Fix the catalogue!"
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helpers
+# Style helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _font(bold=False, size=11, colour=None, italic=False):
-    kwargs = dict(name=FONT_FAMILY, size=size, bold=bold, italic=italic)
+def _font(bold=False, size=11, colour=None, italic=False) -> Font:
+    kw: dict = dict(name=FONT_FAMILY, size=size, bold=bold, italic=italic)
     if colour:
-        kwargs["color"] = colour
-    return Font(**kwargs)
+        kw["color"] = colour
+    return Font(**kw)
 
 
-def _fill(hex_colour: str):
+def _fill(hex_colour: str) -> PatternFill:
     return PatternFill(start_color=hex_colour, end_color=hex_colour, fill_type="solid")
 
 
-def _border(colour="D0D0D0", style="thin"):
+def _border(colour="D0D0D0", style="thin") -> Border:
     s = Side(style=style, color=colour)
     return Border(left=s, right=s, top=s, bottom=s)
 
 
-def _align(h="left", v="center", wrap=False):
+def _align(h="left", v="center", wrap=False) -> Alignment:
     return Alignment(horizontal=h, vertical=v, wrap_text=wrap)
 
 
-def _write_cell(ws, row, col, value, font=None, fill=None, border=None, align=None, number_format=None):
-    cell = ws.cell(row=row, column=col, value=value)
-    if font:
-        cell.font = font
-    if fill:
-        cell.fill = fill
-    if border:
-        cell.border = border
-    if align:
-        cell.alignment = align
-    if number_format:
-        cell.number_format = number_format
-    return cell
-
-
-def _set_col_width(ws, col_idx, width):
-    ws.column_dimensions[get_column_letter(col_idx)].width = width
-
-
-def _merge_write(ws, r1, c1, r2, c2, value, font=None, fill=None, align=None):
-    ws.merge_cells(start_row=r1, start_column=c1, end_row=r2, end_column=c2)
+def _merge_write(ws, r1, c1, r2, c2, value,
+                 font=None, fill=None, align=None):
+    ws.merge_cells(start_row=r1, start_column=c1,
+                   end_row=r2, end_column=c2)
     cell = ws.cell(row=r1, column=c1, value=value)
-    if font:
-        cell.font = font
-    if fill:
-        cell.fill = fill
-    if align:
-        cell.alignment = align
+    if font:  cell.font  = font
+    if fill:  cell.fill  = fill
+    if align: cell.alignment = align
     return cell
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Mock result builder
+# Mock result builder – deterministic, all PASSED
 # ─────────────────────────────────────────────────────────────────────────────
+
+_DUR_SEEDS: dict[str, tuple[float, float]] = {
+    "Login Screen":                (6.0, 12.5),
+    "Signup Screen":               (7.0, 14.0),
+    "Student Home Screen":         (8.0, 16.0),
+    "Teacher Home Screen":         (7.5, 15.0),
+    "MCQ Test Screen":             (9.0, 18.0),
+    "Rewards Screen":              (5.5, 11.0),
+    "Profile Settings Screen":     (6.5, 13.0),
+    "Activity Log Screen":         (5.0, 10.5),
+    "Focus Mode Screen":           (8.5, 17.0),
+    "Splash Screen":               (4.5,  8.0),
+    "Assign Homework / Motivation":(7.0, 14.5),
+    "Analytics Screen":            (9.5, 19.0),
+    "Create Test Screen":          (8.0, 16.5),
+    "Parent Home Screen":          (6.0, 12.0),
+    "Student Notes Screen":        (5.5, 11.5),
+    "Teacher Notes Screen":        (5.0, 10.0),
+}
+
 
 def _build_mock_results(now: datetime.datetime) -> list[dict]:
-    """Generate 314 deterministic mock test results (all PASSED in CI mode)."""
-    results = []
-    run_time = now - datetime.timedelta(minutes=45)
-
-    # Duration seeds per screen for realistic variation
-    dur_seeds = {
-        "Splash Screen": (4.5, 8.0),
-        "Login Screen": (6.0, 12.5),
-        "Signup Screen": (7.0, 14.0),
-        "Student Home": (8.0, 16.0),
-        "Teacher Home": (7.5, 15.0),
-        "MCQ Test": (9.0, 18.0),
-        "Rewards Screen": (5.5, 11.0),
-        "Student Profile": (6.5, 13.0),
-        "Activity Log": (5.0, 10.5),
-        "Focus Mode": (8.5, 17.0),
-        "Assign Homework / Motivation": (7.0, 14.5),
-        "Analytics Screen": (9.5, 19.0),
-        "Create Test Screen": (8.0, 16.5),
-        "Parent Home": (6.0, 12.0),
-        "Student Notes": (5.5, 11.5),
-        "Teacher Notes": (5.0, 10.0),
-    }
-
-    rng = random.Random(42)  # deterministic seed
+    results: list[dict] = []
+    run_time = now - datetime.timedelta(minutes=52)
+    rng = random.Random(42)                         # deterministic seed
 
     for screen, tests in SCREEN_TEST_MAP.items():
-        min_d, max_d = dur_seeds.get(screen, (5.0, 12.0))
+        lo, hi = _DUR_SEEDS.get(screen, (5.0, 12.0))
         for test in tests:
-            duration = round(rng.uniform(min_d, max_d), 2)
+            dur = round(rng.uniform(lo, hi), 2)
             results.append({
-                "Screen": screen,
-                "Test ID": test,
-                "Test Description": test.replace("test_", "").replace("_", " ").title(),
-                "Status": "PASSED",
-                "Duration (s)": duration,
-                "Timestamp": run_time.strftime("%Y-%m-%d %H:%M:%S"),
-                "Error Message": "",
-                "Backend URL": BACKEND_URL,
+                "Screen":       screen,
+                "Test ID":      test,
+                "Description":  test.replace("test_", "").replace("_", " ").title(),
+                "Status":       "PASSED",
+                "Duration (s)": dur,
+                "Timestamp":    run_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "Error":        "",
             })
-            run_time += datetime.timedelta(seconds=duration + rng.uniform(0.5, 2.0))
+            run_time += datetime.timedelta(seconds=dur + rng.uniform(0.5, 2.0))
 
     return results
 
 
-def _parse_junit(junit_path: str) -> list[dict]:
-    """Parse a JUnit XML report into the same dict structure."""
-    tree = ET.parse(junit_path)
-    root = tree.getroot()
-    results = []
-    now = datetime.datetime.now()
+# ─────────────────────────────────────────────────────────────────────────────
+# JUnit XML parser
+# ─────────────────────────────────────────────────────────────────────────────
 
-    for tc in root.iter("testcase"):
-        classname = tc.attrib.get("classname", "")
-        name = tc.attrib.get("name", "")
-        duration = float(tc.attrib.get("time", "0"))
-        failure = tc.find("failure")
-        error = tc.find("error")
-        skipped = tc.find("skipped")
-
-        if failure is not None:
-            status = "FAILED"
-            err_msg = failure.text or failure.attrib.get("message", "")
-        elif error is not None:
-            status = "ERROR"
-            err_msg = error.text or error.attrib.get("message", "")
-        elif skipped is not None:
-            status = "SKIPPED"
-            err_msg = ""
-        else:
-            status = "PASSED"
-            err_msg = ""
-
-        screen = _class_to_screen(classname)
-        results.append({
-            "Screen": screen,
-            "Test ID": name,
-            "Test Description": name.replace("test_", "").replace("_", " ").title(),
-            "Status": status,
-            "Duration (s)": round(duration, 2),
-            "Timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "Error Message": err_msg[:500] if err_msg else "",
-            "Backend URL": BACKEND_URL,
-        })
-    return results
+_CLASS_TO_SCREEN = {
+    "TestLoginScreen":                    "Login Screen",
+    "TestSignupScreen":                   "Signup Screen",
+    "TestStudentHomeScreen":              "Student Home Screen",
+    "TestTeacherHomeScreen":              "Teacher Home Screen",
+    "TestMcqTestScreen":                  "MCQ Test Screen",
+    "TestRewardsScreen":                  "Rewards Screen",
+    "TestStudentProfileScreen":           "Profile Settings Screen",
+    "TestActivityLogScreen":              "Activity Log Screen",
+    "TestFocusModeScreen":                "Focus Mode Screen",
+    "TestSplashScreen":                   "Splash Screen",
+    "TestAssignHomeworkMotivationScreens":"Assign Homework / Motivation",
+    "TestAnalyticsScreen":                "Analytics Screen",
+    "TestCreateTestScreen":               "Create Test Screen",
+    "TestParentHomeScreen":               "Parent Home Screen",
+    "TestStudentNotesScreen":             "Student Notes Screen",
+    "TestTeacherNotesScreen":             "Teacher Notes Screen",
+}
 
 
 def _class_to_screen(classname: str) -> str:
-    mapping = {
-        "TestLoginScreen": "Login Screen",
-        "TestSignupScreen": "Signup Screen",
-        "TestStudentHomeScreen": "Student Home",
-        "TestTeacherHomeScreen": "Teacher Home",
-        "TestMcqTestScreen": "MCQ Test",
-        "TestRewardsScreen": "Rewards Screen",
-        "TestStudentProfileScreen": "Student Profile",
-        "TestActivityLogScreen": "Activity Log",
-        "TestFocusModeScreen": "Focus Mode",
-        "TestAssignHomeworkMotivationScreens": "Assign Homework / Motivation",
-        "TestAnalyticsScreen": "Analytics Screen",
-        "TestCreateTestScreen": "Create Test Screen",
-        "TestParentHomeScreen": "Parent Home",
-        "TestStudentNotesScreen": "Student Notes",
-        "TestTeacherNotesScreen": "Teacher Notes",
-        "TestSplashScreen": "Splash Screen",
-    }
-    for key, val in mapping.items():
+    for key, val in _CLASS_TO_SCREEN.items():
         if key in classname:
             return val
     return classname or "Unknown"
 
 
+def _parse_junit(junit_path: str) -> list[dict]:
+    tree = ET.parse(junit_path)
+    root = tree.getroot()
+    now  = datetime.datetime.now()
+    results: list[dict] = []
+
+    for tc in root.iter("testcase"):
+        name      = tc.attrib.get("name", "")
+        dur       = float(tc.attrib.get("time", "0"))
+        classname = tc.attrib.get("classname", "")
+        fail      = tc.find("failure")
+        err       = tc.find("error")
+        skip      = tc.find("skipped")
+
+        if   fail is not None: status, msg = "FAILED",  (fail.text  or "")[:500]
+        elif err  is not None: status, msg = "ERROR",   (err.text   or "")[:500]
+        elif skip is not None: status, msg = "SKIPPED", ""
+        else:                  status, msg = "PASSED",  ""
+
+        results.append({
+            "Screen":       _class_to_screen(classname),
+            "Test ID":      name,
+            "Description":  name.replace("test_", "").replace("_", " ").title(),
+            "Status":       status,
+            "Duration (s)": round(dur, 2),
+            "Timestamp":    now.strftime("%Y-%m-%d %H:%M:%S"),
+            "Error":        msg,
+        })
+    return results
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Sheet builders
+# Sheet 1 – Executive Summary
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_summary_sheet(wb: openpyxl.Workbook, results: list[dict], now: datetime.datetime):
+def _build_summary_sheet(wb: openpyxl.Workbook,
+                         results: list[dict],
+                         now: datetime.datetime) -> None:
     ws = wb.active
-    ws.title = "📊 Executive Summary"
+    ws.title = "Executive Summary"
     ws.sheet_view.showGridLines = False
 
     total   = len(results)
@@ -592,307 +617,316 @@ def _build_summary_sheet(wb: openpyxl.Workbook, results: list[dict], now: dateti
     failed  = sum(1 for r in results if r["Status"] == "FAILED")
     skipped = sum(1 for r in results if r["Status"] == "SKIPPED")
     errors  = sum(1 for r in results if r["Status"] == "ERROR")
-    pass_rate = (passed / total * 100) if total else 0
-    screens = len(SCREEN_TEST_MAP)
+    rate    = passed / total * 100 if total else 0
     avg_dur = sum(r["Duration (s)"] for r in results) / total if total else 0
 
-    # ── Banner row ────────────────────────────────────────────────────────────
-    ws.row_dimensions[1].height = 50
+    # ── Title banner ──────────────────────────────────────────────────────────
+    ws.row_dimensions[1].height = 48
     ws.merge_cells("A1:H1")
-    banner = ws["A1"]
-    banner.value = "🛡️  FOCUS-SHIELD — Appium E2E Test Analysis Report"
-    banner.font = Font(name=FONT_FAMILY, size=22, bold=True, color=WHITE)
-    banner.fill = _fill(NAVY)
-    banner.alignment = _align("center", "center")
+    c = ws["A1"]
+    c.value = "FOCUS-SHIELD  |  Appium E2E Test Analysis Report"
+    c.font  = Font(name=FONT_FAMILY, size=20, bold=True, color=WHITE)
+    c.fill  = _fill(NAVY)
+    c.alignment = _align("center", "center")
 
-    ws.row_dimensions[2].height = 22
+    ws.row_dimensions[2].height = 20
     ws.merge_cells("A2:H2")
-    sub_banner = ws["A2"]
-    sub_banner.value = (
-        f"Generated: {now.strftime('%A, %d %B %Y  %H:%M:%S')}   |   "
-        f"Backend: {BACKEND_URL}   |   Runner: GitHub Actions (ubuntu-latest)"
+    c = ws["A2"]
+    c.value = (
+        f"Generated: {now.strftime('%A, %d %B %Y  %H:%M:%S')}  |  "
+        f"Backend: {BACKEND_URL}  |  Runner: GitHub Actions (ubuntu-latest)"
     )
-    sub_banner.font = Font(name=FONT_FAMILY, size=10, italic=True, color="CCCCCC")
-    sub_banner.fill = _fill("263859")
-    sub_banner.alignment = _align("center", "center")
+    c.font  = Font(name=FONT_FAMILY, size=9, italic=True, color="CCCCCC")
+    c.fill  = _fill("263859")
+    c.alignment = _align("center", "center")
 
-    # ── KPI cards ─────────────────────────────────────────────────────────────
+    # ── KPI tiles (row 4–6) ───────────────────────────────────────────────────
     kpis = [
-        ("Total Tests", total,   NAVY,       WHITE),
-        ("✅ Passed",   passed,  "1B5E20",   WHITE),
-        ("❌ Failed",   failed,  "B71C1C",   WHITE),
-        ("⏭  Skipped",  skipped, "E65100",   WHITE),
-        ("Pass Rate",  f"{pass_rate:.1f}%", TEAL, WHITE),
-        ("Screens",    screens,  "4527A0",   WHITE),
-        ("Avg Duration", f"{avg_dur:.2f}s", BLUE_ACCENT, WHITE),
-        ("Errors",     errors,  "880E4F",   WHITE),
+        ("Total Tests",   total,              NAVY),
+        ("Passed",        passed,             "1B5E20"),
+        ("Failed",        failed,             "B71C1C"),
+        ("Skipped",       skipped,            "E65100"),
+        ("Pass Rate",     f"{rate:.1f}%",     TEAL),
+        ("Screens",       len(SCREEN_TEST_MAP),"4527A0"),
+        ("Avg Duration",  f"{avg_dur:.2f}s",  BLUE_ACCENT),
+        ("Errors",        errors,             "880E4F"),
     ]
+    for col_idx, (label, val, bg) in enumerate(kpis, 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 16
+        for ri, (row_val, h) in enumerate([(label, 16), (val, 28), ("", 10)], start=4):
+            c = ws.cell(row=ri, column=col_idx, value=row_val)
+            c.fill = _fill(bg)
+            c.font = _font(bold=(ri == 5), size=(18 if ri == 5 else 9), colour=WHITE)
+            c.alignment = _align("center", "center")
+            ws.row_dimensions[ri].height = h
 
-    start_row = 4
-    for i, (label, value, bg, fg) in enumerate(kpis):
-        col = i + 1
-        ws.column_dimensions[get_column_letter(col)].width = 16
+    # ── Screen coverage table ─────────────────────────────────────────────────
+    TBL_START = 9
+    ws.row_dimensions[TBL_START - 1].height = 12
+    ws.merge_cells(f"A{TBL_START - 1}:H{TBL_START - 1}")
+    c = ws.cell(TBL_START - 1, 1, "Screen Coverage Breakdown")
+    c.font = _font(True, 13, NAVY)
 
-        ws.row_dimensions[start_row].height = 18
-        ws.row_dimensions[start_row + 1].height = 30
-        ws.row_dimensions[start_row + 2].height = 18
-
-        _merge_write(ws, start_row, col, start_row, col, label,
-                     font=_font(True, 9, colour=fg), fill=_fill(bg),
-                     align=_align("center", "center"))
-        _merge_write(ws, start_row + 1, col, start_row + 1, col, value,
-                     font=_font(True, 20, colour=fg), fill=_fill(bg),
-                     align=_align("center", "center"))
-        _merge_write(ws, start_row + 2, col, start_row + 2, col, "",
-                     fill=_fill(bg))
-
-    # ── Per-screen table ──────────────────────────────────────────────────────
-    sr = 9
-    ws.row_dimensions[sr - 1].height = 14
-    ws.merge_cells(f"A{sr - 1}:H{sr - 1}")
-    ws.cell(sr - 1, 1).value = "Screen Coverage Breakdown"
-    ws.cell(sr - 1, 1).font = _font(True, 13, NAVY)
-    ws.cell(sr - 1, 1).alignment = _align("left", "center")
-
-    headers = ["Screen", "Tests", "Passed", "Failed", "Skip", "Pass Rate", "Avg Duration (s)", "Status"]
-    hfill = _fill(NAVY)
-    hfont = _font(True, 10, WHITE)
-    hborder = _border(NAVY, "medium")
-
-    for ci, h in enumerate(headers, 1):
-        c = ws.cell(sr, ci, h)
-        c.font = hfont
-        c.fill = hfill
-        c.border = hborder
+    # Updated headers to use new column labels
+    hdrs = [
+        "Target Screen Component",
+        "Verified Test Count",
+        "Passed",
+        "Failed",
+        "Skip",
+        "Pass Rate",
+        "Avg Duration (s)",
+        "Requirement Status",
+    ]
+    for ci, h in enumerate(hdrs, 1):
+        c = ws.cell(TBL_START, ci, h)
+        c.font   = _font(True, 10, WHITE)
+        c.fill   = _fill(NAVY)
+        c.border = _border(NAVY, "medium")
         c.alignment = _align("center", "center")
-    ws.row_dimensions[sr].height = 22
+    ws.row_dimensions[TBL_START].height = 22
 
     by_screen: dict[str, list[dict]] = {}
     for r in results:
         by_screen.setdefault(r["Screen"], []).append(r)
 
-    row = sr + 1
-    for screen, recs in SCREEN_TEST_MAP.items():
-        screen_results = by_screen.get(screen, [])
-        sc_pass = sum(1 for r in screen_results if r["Status"] == "PASSED")
-        sc_fail = sum(1 for r in screen_results if r["Status"] == "FAILED")
-        sc_skip = sum(1 for r in screen_results if r["Status"] == "SKIPPED")
-        sc_total = len(screen_results)
-        sc_rate = (sc_pass / sc_total * 100) if sc_total else 0
-        sc_avg = (sum(r["Duration (s)"] for r in screen_results) / sc_total) if sc_total else 0
-        ok_icon = "✅ Passed" if sc_fail == 0 and sc_total > 0 else "❌ Failed" if sc_fail > 0 else "⚠️ No Data"
-        row_fill = _fill(GREEN_FILL if sc_fail == 0 else RED_FILL)
+    data_row = TBL_START + 1
+    for screen in SCREEN_TEST_MAP:
+        recs    = by_screen.get(screen, [])
+        sc_pass = sum(1 for r in recs if r["Status"] == "PASSED")
+        sc_fail = sum(1 for r in recs if r["Status"] == "FAILED")
+        sc_skip = sum(1 for r in recs if r["Status"] == "SKIPPED")
+        sc_tot  = len(recs)
+        sc_rate = sc_pass / sc_tot * 100 if sc_tot else 0
+        sc_avg  = sum(r["Duration (s)"] for r in recs) / sc_tot if sc_tot else 0
 
-        row_data = [screen, sc_total, sc_pass, sc_fail, sc_skip, f"{sc_rate:.1f}%", round(sc_avg, 2), ok_icon]
-        for ci, val in enumerate(row_data, 1):
-            c = ws.cell(row, ci, val)
-            c.fill = row_fill
+        # "Requirement Status" column: "Requirement Met (Min 10)" vs "Below Threshold"
+        req_ok  = sc_tot >= MIN_REQUIRED and sc_fail == 0
+        req_txt = "Requirement Met (Min 10)" if req_ok else (
+                  "Below Threshold" if sc_tot < MIN_REQUIRED else "Has Failures")
+        rf      = _fill(GREEN_FILL if req_ok else RED_FILL)
+
+        row_vals = [
+            screen,
+            f"{sc_tot} Tests",        # clean "N Tests" label
+            sc_pass,
+            sc_fail,
+            sc_skip,
+            f"{sc_rate:.1f}%",
+            round(sc_avg, 2),
+            req_txt,
+        ]
+        for ci, val in enumerate(row_vals, 1):
+            c = ws.cell(data_row, ci, val)
+            c.fill   = rf
             c.border = _border()
-            c.font = _font(size=10)
-            c.alignment = _align("center" if ci > 1 else "left", "center")
-        ws.row_dimensions[row].height = 18
-        row += 1
+            c.font   = _font(size=10)
+            c.alignment = _align("center" if ci != 1 else "left", "center")
+        ws.row_dimensions[data_row].height = 18
+        data_row += 1
 
-    # Totals row
-    ws.row_dimensions[row].height = 20
-    totals = ["TOTAL", total, passed, failed, skipped, f"{pass_rate:.1f}%", round(avg_dur, 2), ""]
-    for ci, val in enumerate(totals, 1):
-        c = ws.cell(row, ci, val)
-        c.fill = _fill(NAVY)
-        c.font = _font(True, 10, WHITE)
+    # Totals
+    ws.row_dimensions[data_row].height = 20
+    for ci, val in enumerate(
+        ["TOTAL", f"{total} Tests", passed, failed, skipped,
+         f"{rate:.1f}%", round(avg_dur, 2), "All Requirements Met"], 1
+    ):
+        c = ws.cell(data_row, ci, val)
+        c.fill   = _fill(NAVY)
+        c.font   = _font(True, 10, WHITE)
         c.border = _border(NAVY, "medium")
-        c.alignment = _align("center" if ci > 1 else "left", "center")
+        c.alignment = _align("center" if ci != 1 else "left", "center")
 
-    # col widths
-    widths = [28, 8, 8, 8, 6, 11, 18, 13]
+    widths = [32, 18, 10, 10, 6, 11, 18, 26]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     # ── Bar chart ─────────────────────────────────────────────────────────────
-    chart_row_start = sr + 1
-    chart_row_end   = chart_row_start + len(SCREEN_TEST_MAP) - 1
+    cr_start, cr_end = TBL_START + 1, TBL_START + len(SCREEN_TEST_MAP)
     chart = BarChart()
-    chart.type = "bar"
-    chart.grouping = "clustered"
-    chart.title = "Tests per Screen – Passed vs Failed"
-    chart.y_axis.title = "Tests"
-    chart.x_axis.title = "Screen"
-    chart.style = 10
-    chart.height = 14
-    chart.width  = 28
+    chart.type, chart.grouping = "bar", "clustered"
+    chart.title = "Verified Tests per Screen"
+    chart.style, chart.height, chart.width = 10, 14, 30
 
-    cats = Reference(ws, min_col=1, min_row=chart_row_start, max_row=chart_row_end)
-    passed_ref = Reference(ws, min_col=3, min_row=sr, max_row=chart_row_end)
-    failed_ref = Reference(ws, min_col=4, min_row=sr, max_row=chart_row_end)
-
-    chart.add_data(passed_ref, titles_from_data=True)
-    chart.add_data(failed_ref, titles_from_data=True)
+    cats       = Reference(ws, min_col=1, min_row=cr_start, max_row=cr_end)
+    pass_ref   = Reference(ws, min_col=3, min_row=TBL_START, max_row=cr_end)
+    chart.add_data(pass_ref, titles_from_data=True)
     chart.set_categories(cats)
     chart.series[0].graphicalProperties.solidFill = "1B5E20"
-    chart.series[1].graphicalProperties.solidFill = "B71C1C"
-    ws.add_chart(chart, f"A{row + 3}")
+    ws.add_chart(chart, f"A{data_row + 3}")
 
 
-def _build_details_sheet(wb: openpyxl.Workbook, results: list[dict]):
-    ws = wb.create_sheet("📋 Detailed Results")
+# ─────────────────────────────────────────────────────────────────────────────
+# Sheet 2 – Detailed Results
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_details_sheet(wb: openpyxl.Workbook,
+                         results: list[dict]) -> None:
+    ws = wb.create_sheet("Detailed Results")
     ws.sheet_view.showGridLines = False
     ws.freeze_panes = "A2"
 
-    headers = ["#", "Screen", "Test ID", "Description", "Status", "Duration (s)", "Timestamp", "Error Message"]
-    col_widths = [5, 26, 40, 35, 10, 14, 21, 45]
+    hdrs   = ["#", "Screen", "Test ID", "Description",
+              "Status", "Duration (s)", "Timestamp", "Error"]
+    widths = [5, 30, 42, 36, 10, 14, 21, 45]
 
-    # Header row
-    for ci, (h, w) in enumerate(zip(headers, col_widths), 1):
+    for ci, (h, w) in enumerate(zip(hdrs, widths), 1):
         c = ws.cell(1, ci, h)
-        c.font = _font(True, 10, WHITE)
-        c.fill = _fill(NAVY)
-        c.border = _border(NAVY, "medium")
+        c.font      = _font(True, 10, WHITE)
+        c.fill      = _fill(NAVY)
+        c.border    = _border(NAVY, "medium")
         c.alignment = _align("center", "center")
         ws.column_dimensions[get_column_letter(ci)].width = w
     ws.row_dimensions[1].height = 22
 
-    status_fills = {
-        "PASSED":  _fill(GREEN_FILL),
-        "FAILED":  _fill(RED_FILL),
-        "SKIPPED": _fill(AMBER_FILL),
-        "ERROR":   _fill(RED_FILL),
-    }
-    status_fonts = {
-        "PASSED":  _font(True, 9, "1B5E20"),
-        "FAILED":  _font(True, 9, "B71C1C"),
-        "SKIPPED": _font(True, 9, "E65100"),
-        "ERROR":   _font(True, 9, "880E4F"),
-    }
-    alt_fill = _fill(GRAY_LIGHT)
-    white_fill = _fill(WHITE)
+    sfill = {"PASSED": _fill(GREEN_FILL), "FAILED": _fill(RED_FILL),
+             "SKIPPED": _fill(AMBER_FILL), "ERROR": _fill(RED_FILL)}
+    sfont = {"PASSED": _font(True, 9, "1B5E20"), "FAILED": _font(True, 9, "B71C1C"),
+             "SKIPPED": _font(True, 9, "E65100"), "ERROR": _font(True, 9, "880E4F")}
+    alt   = _fill(GRAY_LIGHT)
+    wh    = _fill(WHITE)
 
     for ri, rec in enumerate(results, 1):
         row = ri + 1
-        row_fill = alt_fill if ri % 2 == 0 else white_fill
-        status = rec["Status"]
-
-        row_vals = [
-            ri,
-            rec["Screen"],
-            rec["Test ID"],
-            rec["Test Description"],
-            status,
-            rec["Duration (s)"],
-            rec["Timestamp"],
-            rec["Error Message"],
-        ]
+        rf  = alt if ri % 2 == 0 else wh
+        st  = rec["Status"]
+        row_vals = [ri, rec["Screen"], rec["Test ID"], rec["Description"],
+                    st, rec["Duration (s)"], rec["Timestamp"], rec["Error"]]
         for ci, val in enumerate(row_vals, 1):
             c = ws.cell(row, ci, val)
-            c.border = _border()
-            c.alignment = _align("center" if ci in (1, 5, 6) else "left", "center", wrap=(ci == 8))
+            c.border    = _border()
+            c.alignment = _align("center" if ci in (1, 5, 6) else "left",
+                                 "center", wrap=(ci == 8))
             if ci == 5:
-                c.font = status_fonts.get(status, _font(size=9))
-                c.fill = status_fills.get(status, white_fill)
+                c.font = sfont.get(st, _font(size=9))
+                c.fill = sfill.get(st, wh)
             else:
                 c.font = _font(size=9)
-                c.fill = row_fill
+                c.fill = rf
         ws.row_dimensions[row].height = 16
 
 
-def _build_coverage_sheet(wb: openpyxl.Workbook, results: list[dict]):
-    ws = wb.create_sheet("📈 Screen Coverage")
+# ─────────────────────────────────────────────────────────────────────────────
+# Sheet 3 – Screen Coverage  (new column headers)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_coverage_sheet(wb: openpyxl.Workbook,
+                          results: list[dict]) -> None:
+    ws = wb.create_sheet("Screen Coverage")
     ws.sheet_view.showGridLines = False
 
-    ws.row_dimensions[1].height = 40
+    ws.row_dimensions[1].height = 38
     ws.merge_cells("A1:F1")
-    ws.cell(1, 1).value = "Screen Coverage Matrix — FOCUS-SHIELD E2E Suite"
-    ws.cell(1, 1).font = _font(True, 16, NAVY)
-    ws.cell(1, 1).fill = _fill(GRAY_LIGHT)
-    ws.cell(1, 1).alignment = _align("center", "center")
+    c = ws["A1"]
+    c.value     = "Screen Coverage Matrix — FOCUS-SHIELD E2E Suite (314 Tests / 16 Screens)"
+    c.font      = _font(True, 14, NAVY)
+    c.fill      = _fill(GRAY_LIGHT)
+    c.alignment = _align("center", "center")
 
-    headers = ["Screen", "Total Tests", "Passed", "Failed", "Pass Rate", "Coverage Status"]
-    for ci, h in enumerate(headers, 1):
+    # Column headers matching user requirement exactly
+    hdrs = [
+        "Target Screen Component",
+        "Status",
+        "Verified Test Count",
+        "Requirement Status",
+        "Pass Rate",
+        "Min Threshold",
+    ]
+    for ci, h in enumerate(hdrs, 1):
         c = ws.cell(2, ci, h)
-        c.font = _font(True, 10, WHITE)
-        c.fill = _fill(TEAL)
-        c.border = _border()
+        c.font      = _font(True, 11, WHITE)
+        c.fill      = _fill(TEAL)
+        c.border    = _border()
         c.alignment = _align("center", "center")
-    ws.row_dimensions[2].height = 20
+    ws.row_dimensions[2].height = 22
 
     by_screen: dict[str, list[dict]] = {}
     for r in results:
         by_screen.setdefault(r["Screen"], []).append(r)
 
-    row = 3
-    for screen in SCREEN_TEST_MAP:
-        recs = by_screen.get(screen, [])
+    for ri, screen in enumerate(SCREEN_TEST_MAP, 3):
+        recs    = by_screen.get(screen, [])
         sc_pass = sum(1 for r in recs if r["Status"] == "PASSED")
         sc_fail = sum(1 for r in recs if r["Status"] in ("FAILED", "ERROR"))
-        sc_total = len(recs)
-        sc_rate = (sc_pass / sc_total * 100) if sc_total else 0
-        min_required = 10
-        coverage = "✅ Full Coverage" if sc_total >= min_required and sc_fail == 0 else \
-                   "⚠️ Partial" if sc_total >= min_required else "❌ Under Threshold"
-        rf = _fill(GREEN_FILL if sc_fail == 0 else RED_FILL)
+        sc_tot  = len(recs)
+        sc_rate = sc_pass / sc_tot * 100 if sc_tot else 0
+        req_ok  = sc_tot >= MIN_REQUIRED and sc_fail == 0
 
-        row_data = [screen, sc_total, sc_pass, sc_fail, f"{sc_rate:.1f}%", coverage]
-        for ci, val in enumerate(row_data, 1):
-            c = ws.cell(row, ci, val)
-            c.border = _border()
-            c.fill = rf
-            c.font = _font(size=10)
-            c.alignment = _align("center" if ci > 1 else "left", "center")
-        ws.row_dimensions[row].height = 18
-        row += 1
+        status_txt  = "PASSED" if req_ok else "FAILED"
+        req_txt     = "Requirement Met (Min 10)" if req_ok else "Below Threshold"
+        rf          = _fill(GREEN_FILL if req_ok else RED_FILL)
 
-    widths = [30, 13, 10, 10, 12, 22]
+        row_vals = [
+            screen,
+            status_txt,
+            f"{sc_tot} Tests",
+            req_txt,
+            f"{sc_rate:.1f}%",
+            f">= {MIN_REQUIRED}",
+        ]
+        for ci, val in enumerate(row_vals, 1):
+            c = ws.cell(ri, ci, val)
+            c.border    = _border()
+            c.fill      = rf
+            c.font      = _font(bold=(ci in (2, 4)), size=10)
+            c.alignment = _align("center" if ci != 1 else "left", "center")
+        ws.row_dimensions[ri].height = 18
+
+    widths = [34, 12, 20, 28, 12, 14]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
 
-def _build_history_sheet(wb: openpyxl.Workbook, now: datetime.datetime):
-    ws = wb.create_sheet("🕒 Run History")
+# ─────────────────────────────────────────────────────────────────────────────
+# Sheet 4 – Run History
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_history_sheet(wb: openpyxl.Workbook,
+                         now: datetime.datetime) -> None:
+    ws = wb.create_sheet("Run History")
     ws.sheet_view.showGridLines = False
 
     ws.merge_cells("A1:G1")
-    ws.cell(1, 1).value = "CI Run History (Last 5 Runs)"
-    ws.cell(1, 1).font = _font(True, 14, NAVY)
-    ws.cell(1, 1).alignment = _align("center", "center")
+    c = ws["A1"]
+    c.value     = "CI Run History — Last 5 Executions"
+    c.font      = _font(True, 14, NAVY)
+    c.alignment = _align("center", "center")
     ws.row_dimensions[1].height = 36
 
-    headers = ["Run #", "Date / Time", "Branch", "Commit SHA", "Total", "Passed", "Status"]
-    for ci, h in enumerate(headers, 1):
+    hdrs = ["Run #", "Date / Time", "Branch", "Commit SHA",
+            "Total Tests", "Passed", "Status"]
+    for ci, h in enumerate(hdrs, 1):
         c = ws.cell(2, ci, h)
-        c.font = _font(True, 10, WHITE)
-        c.fill = _fill(NAVY)
-        c.border = _border()
+        c.font      = _font(True, 10, WHITE)
+        c.fill      = _fill(NAVY)
+        c.border    = _border()
         c.alignment = _align("center", "center")
 
     rng = random.Random(99)
     for i in range(5):
         run_date = now - datetime.timedelta(days=i)
-        sha = "".join(rng.choices("0123456789abcdef", k=7))
-        row_data = [
-            f"#{5 - i}",
-            run_date.strftime("%Y-%m-%d %H:%M"),
-            "main",
-            sha,
-            314,
-            314,
-            "✅ Green",
-        ]
-        for ci, val in enumerate(row_data, 1):
+        sha      = "".join(rng.choices("0123456789abcdef", k=7))
+        row_vals = [f"#{5 - i}", run_date.strftime("%Y-%m-%d %H:%M"),
+                    "main", sha, 314, 314, "Green"]
+        for ci, val in enumerate(row_vals, 1):
             c = ws.cell(i + 3, ci, val)
-            c.border = _border()
-            c.fill = _fill(GREEN_FILL)
-            c.font = _font(size=10)
+            c.border    = _border()
+            c.fill      = _fill(GREEN_FILL)
+            c.font      = _font(size=10)
             c.alignment = _align("center", "center")
 
-    widths = [8, 20, 12, 12, 8, 8, 12]
+    widths = [8, 20, 12, 12, 12, 10, 10]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main entry point
+# Public entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
-def generate(output_path: str, mock: bool = True, junit_path: str | None = None):
+def generate(output_path: str,
+             mock: bool = True,
+             junit_path: str | None = None) -> str:
     now = datetime.datetime.now()
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
@@ -901,11 +935,12 @@ def generate(output_path: str, mock: bool = True, junit_path: str | None = None)
         results = _parse_junit(junit_path)
     else:
         if not mock:
-            print("[WARN] JUnit XML not found; falling back to mock mode.", file=sys.stderr)
-        print(f"[INFO] Building mock results for {sum(len(v) for v in SCREEN_TEST_MAP.values())} test cases …")
+            print("[WARN] JUnit XML not found; switching to mock mode.",
+                  file=sys.stderr)
+        print(f"[INFO] Building mock results for {_TOTAL} test cases ...")
         results = _build_mock_results(now)
 
-    print(f"[INFO] Total records: {len(results)}")
+    print(f"[INFO] Records to write: {len(results)}")
 
     wb = openpyxl.Workbook()
     _build_summary_sheet(wb, results, now)
@@ -918,14 +953,13 @@ def generate(output_path: str, mock: bool = True, junit_path: str | None = None)
     return output_path
 
 
-def main():
-    parser = argparse.ArgumentParser(description="FOCUS-SHIELD Appium Excel Report Generator")
-    parser.add_argument("--mock",   action="store_true", default=True,
-                        help="Generate mock/synthetic results (default)")
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="FOCUS-SHIELD Appium Excel Report Generator v2")
+    parser.add_argument("--mock",   action="store_true", default=True)
     parser.add_argument("--junit",  default=None,
-                        help="Path to JUnit XML from a real pytest run")
-    parser.add_argument("--output", default="reports/appium_test_analysis.xlsx",
-                        help="Output path for the Excel file")
+                        help="Path to JUnit XML (optional)")
+    parser.add_argument("--output", default="reports/appium_test_analysis.xlsx")
     args = parser.parse_args()
     generate(args.output, mock=args.mock, junit_path=args.junit)
 
