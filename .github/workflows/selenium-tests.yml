@@ -52,6 +52,7 @@ jobs:
           - **Total Tests Executed:** 300 Tests
           - **College Compliance Threshold:** Cleared (Min 10 Tests per Screen)
           - **Target Environment Production URL:** <https://focus-shield-three.vercel.app>
+          - **Multi-Sheet Report Download:** Excel artifact contains both **Sheet 1 ('Web Portal Summary')** and **Sheet 2 ('Detailed Web Suite')** with complete web element breakdown (`WEB_AUTH_001`, `WEB_DASH_015`, etc.).
 
           ---
 
@@ -77,5 +78,6 @@ jobs:
           | **TOTAL** | **✅ ALL GREEN** | **300 Tests** | **All Requirements Met** |
 
           ---
+          > 📊 **Note:** Download `selenium_test_analysis.xlsx` from the Artifacts zip above to view **Sheet 1 ('Web Portal Summary')** and **Sheet 2 ('Detailed Web Suite')** for full web element logs.
           *Report generated dynamically by reports/generate_selenium_excel.py and pushed to workflow artifact archive.*
           MARKDOWN

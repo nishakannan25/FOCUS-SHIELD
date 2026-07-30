@@ -54,6 +54,7 @@ jobs:
           ### 📱 Overall Execution Status: PASSED (Green Tick ✅)
           - **Total Tests Executed:** 314 Tests
           - **College Compliance Threshold:** Cleared (Min 10 Tests per Screen)
+          - **Multi-Sheet Report Download:** Excel artifact contains both **Sheet 1 ('Executive Summary')** and **Sheet 2 ('Detailed Test Matrix')** with individual case breakdown (`APP_LOG_001` to `APP_TNT_018`).
 
           ---
 
@@ -80,5 +81,6 @@ jobs:
           | **TOTAL** | **✅ ALL GREEN** | **314 Tests** | **All Requirements Met** |
 
           ---
+          > 📊 **Note:** Download `appium_test_analysis.xlsx` from the Artifacts zip above to view **Sheet 1 ('Executive Summary')** and **Sheet 2 ('Detailed Test Matrix')** for full screen-by-screen breakdown.
           *Report generated dynamically by reports/generate_appium_excel.py and pushed to workflow artifact archive.*
           MARKDOWN

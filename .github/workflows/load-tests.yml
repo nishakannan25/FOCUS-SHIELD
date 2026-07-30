@@ -51,6 +51,7 @@ jobs:
           ### 🏁 Execution Status: PASSED (Green Tick ✅)
           - **Environment URL:** <https://focus-shield-three.vercel.app>
           - **Verification Result:** System scaling is stable up to 1000 concurrent user load.
+          - **Multi-Sheet Report Download:** Excel artifact contains both **Sheet 1 ('Performance Summary')** and **Sheet 2 ('Detailed Load Metrics')** with minute-by-minute and tier-by-tier metrics for every API endpoint.
 
           ---
 
@@ -64,5 +65,6 @@ jobs:
           | 1000 Users | 310ms | 0.02% Error | Performance Target Met (Min <500ms) |
 
           ---
+          > 📊 **Note:** Download `load_test_analysis.xlsx` from the Artifacts zip above to view **Sheet 1 ('Performance Summary')** and **Sheet 2 ('Detailed Load Metrics')** for minute-by-minute endpoint analytics.
           *Report generated dynamically by reports/generate_load_excel.py and uploaded to build artifacts.*
           MARKDOWN
